@@ -76,6 +76,8 @@ void Error_Handler(void);
 #define PIR_Pin GPIO_PIN_8
 #define PIR_GPIO_Port GPIOC
 #define PIR_EXTI_IRQn EXTI9_5_IRQn
+#define PLED_Pin GPIO_PIN_9
+#define PLED_GPIO_Port GPIOC
 #define LD2_Pin GPIO_PIN_1
 #define LD2_GPIO_Port GPIOE
 

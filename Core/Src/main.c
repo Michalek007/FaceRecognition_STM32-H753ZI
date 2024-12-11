@@ -63,6 +63,8 @@ ETH_DMADescTypeDef DMATxDscrTab[ETH_TX_DESC_CNT] __attribute__((section(".TxDecr
 
 ETH_TxPacketConfig TxConfig;
 
+ADC_HandleTypeDef hadc1;
+
 ETH_HandleTypeDef heth;
 
 JPEG_HandleTypeDef hjpeg;
@@ -79,7 +81,8 @@ uint8_t rxDone = 0;
 uint8_t rxInProgress = 0;
 uint16_t rxBufferSize = 2;
 uint8_t txBufferGetImage[1] = {255};
-uint8_t txBufferTest[1] = {0};
+uint8_t txBufferSentImage[1] = {0};
+uint8_t txBufferTest[1] = {1};
 uint8_t enableEcho = 0;
 uint8_t receivedData[10000] = {0};
 size_t receivedDataSize = 0;
@@ -88,16 +91,19 @@ uint8_t txNull[5] = {0};
 uint8_t image[320*240*3] = {0};
 uint32_t imageSize = 320*240*3;
 
+uint16_t adcValue = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_ETH_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_JPEG_Init(void);
+static void MX_ADC1_Init(void);
+static void MX_ETH_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -135,12 +141,15 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_ETH_Init();
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   MX_USART2_UART_Init();
   MX_JPEG_Init();
+  MX_ADC1_Init();
+  MX_ETH_Init();
   /* USER CODE BEGIN 2 */
+
+  HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
 
   /* USER CODE END 2 */
 
@@ -151,8 +160,28 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+//      // Wait for ADC conversion to complete
+//	  HAL_ADC_Start(&hadc1);
+//      if (HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY) == HAL_OK) {
+//          // Get the ADC value
+//    	  adcValue = HAL_ADC_GetValue(&hadc1);
+//
+//          // Use adcValue as needed
+//          uint8_t txADC[2] = {0};
+//    	  txADC[0] = (adcValue >> 8) & 0xFF;  // Extract the higher 8 bits
+//    	  txADC[1] = adcValue & 0xFF;         // Extract the lowest 8 bits
+//    	  HAL_UART_Transmit(&huart3, txADC, 2, 100);
+//    	  if (adcValue <= 255){
+//    		  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_SET);
+//    	  }
+//    	  else{
+//    		  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
+//    	  }
+//    	  HAL_Delay(2000);
+//      }
 
 	  if (rxDone){
+		  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
 		  HAL_UART_Transmit(&huart3, txNull, 5, 100);
 		  HAL_UART_Transmit(&huart3, receivedData, receivedDataSize, 5000);
 //		  HAL_StatusTypeDef status = HAL_JPEG_Decode(&hjpeg, receivedData, receivedDataSize, image, imageSize, HAL_MAX_DELAY);
@@ -247,6 +276,74 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief ADC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC1_Init(void)
+{
+
+  /* USER CODE BEGIN ADC1_Init 0 */
+
+  /* USER CODE END ADC1_Init 0 */
+
+  ADC_MultiModeTypeDef multimode = {0};
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC1_Init 1 */
+
+  /* USER CODE END ADC1_Init 1 */
+
+  /** Common config
+  */
+  hadc1.Instance = ADC1;
+  hadc1.Init.ClockPrescaler = ADC_CLOCK_ASYNC_DIV256;
+  hadc1.Init.Resolution = ADC_RESOLUTION_16B;
+  hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.LowPowerAutoWait = DISABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
+  hadc1.Init.NbrOfConversion = 1;
+  hadc1.Init.DiscontinuousConvMode = DISABLE;
+  hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc1.Init.ConversionDataManagement = ADC_CONVERSIONDATA_DR;
+  hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+  hadc1.Init.LeftBitShift = ADC_LEFTBITSHIFT_NONE;
+  hadc1.Init.OversamplingMode = DISABLE;
+  if (HAL_ADC_Init(&hadc1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure the ADC multi-mode
+  */
+  multimode.Mode = ADC_MODE_INDEPENDENT;
+  if (HAL_ADCEx_MultiModeConfigChannel(&hadc1, &multimode) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_2;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  sConfig.SingleDiff = ADC_SINGLE_ENDED;
+  sConfig.OffsetNumber = ADC_OFFSET_NONE;
+  sConfig.Offset = 0;
+  sConfig.OffsetSignedSaturation = DISABLE;
+  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC1_Init 2 */
+
+  /* USER CODE END ADC1_Init 2 */
+
 }
 
 /**
@@ -472,6 +569,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOG_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
@@ -481,6 +579,9 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(USB_OTG_FS_PWR_EN_GPIO_Port, USB_OTG_FS_PWR_EN_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
@@ -514,8 +615,15 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : PIR_Pin */
   GPIO_InitStruct.Pin = PIR_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(PIR_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PLED_Pin */
+  GPIO_InitStruct.Pin = PLED_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(PLED_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : LD2_Pin */
   GPIO_InitStruct.Pin = LD2_Pin;
@@ -575,14 +683,28 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   }
   else if (GPIO_Pin == GPIO_PIN_8){
 	  if (!rxInProgress){
+		  HAL_ADC_Start(&hadc1);
+	      if (HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY) == HAL_OK) {
+	          // Get the ADC value
+	    	  adcValue = HAL_ADC_GetValue(&hadc1);
+	    	  if (adcValue <= 255){
+	    		  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_SET);
+	    	  }
+
+	          // Use adcValue as needed
+	          uint8_t txADC[2] = {0};
+	    	  txADC[0] = (adcValue >> 8) & 0xFF;  // Extract the higher 8 bits
+	    	  txADC[1] = adcValue & 0xFF;         // Extract the lowest 8 bits
+	    	  HAL_UART_Transmit(&huart3, txADC, 2, 100);
+	      }
 		  HAL_StatusTypeDef error = HAL_UART_Receive_IT(&huart2, rxBuffer, rxBufferSize);
 		  if (error == HAL_ERROR || error == HAL_BUSY){
 			  uint8_t txError[1] = {error};
 			  HAL_UART_Transmit(&huart3, txError, 1, 100);
 			  return;
 		  }
-		  HAL_UART_Transmit(&huart2, txBufferTest, 1, 100);
-		  HAL_UART_Transmit(&huart3, txBufferTest, 1, 100);
+		  HAL_UART_Transmit(&huart2, txBufferSentImage, 1, 100);
+		  HAL_UART_Transmit(&huart3, txBufferSentImage, 1, 100);
 		  rxInProgress = 1;
 	  }
   } else {
