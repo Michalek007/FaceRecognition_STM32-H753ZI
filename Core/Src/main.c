@@ -35,6 +35,9 @@
 
 #define ENABLE_TEST_PRINT 1
 #define RX_MAX_BUFF_SIZE 1024
+#define IMAGE_SIZE 230400
+#define IMAGE_WIDTH 320
+#define IMAGE_HEIGHT 240
 
 /* USER CODE END PD */
 
@@ -77,21 +80,22 @@ PCD_HandleTypeDef hpcd_USB_OTG_FS;
 /* USER CODE BEGIN PV */
 
 uint8_t rxBuffer[RX_MAX_BUFF_SIZE] = {0};
-uint8_t rxDone = 0;
-uint8_t rxInProgress = 0;
-uint16_t rxBufferSize = 2;
+volatile uint8_t rxDone = 0;
+volatile uint8_t rxInProgress = 0;
+volatile uint16_t rxBufferSize = 2;
 uint8_t txBufferGetImage[1] = {255};
 uint8_t txBufferSentImage[1] = {0};
 uint8_t txBufferTest[1] = {1};
 uint8_t enableEcho = 0;
-uint8_t receivedData[10000] = {0};
-size_t receivedDataSize = 0;
+uint8_t receivedData[320*240*2] = {0};
+//uint8_t receivedData[10000] = {0};
+volatile size_t receivedDataSize = 0;
 uint8_t txNull[5] = {0};
 
-uint8_t image[320*240*3] = {0};
-uint32_t imageSize = 320*240*3;
+//uint8_t image[320*240*3] = {0};
+//uint32_t imageSize = 320*240*3;
 
-uint16_t adcValue = 0;
+volatile uint16_t adcValue = 0;
 
 /* USER CODE END PV */
 
@@ -182,8 +186,64 @@ int main(void)
 
 	  if (rxDone){
 		  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
-		  HAL_UART_Transmit(&huart3, txNull, 5, 100);
-		  HAL_UART_Transmit(&huart3, receivedData, receivedDataSize, 5000);
+//		  HAL_UART_Transmit(&huart3, txNull, 5, 100);
+//		  HAL_UART_Transmit(&huart3, receivedData, receivedDataSize, 5000);
+//		  size_t pointer = 0;
+//		  HAL_UART_Transmit(&huart3, txNull, 5, 100);
+//		  uint16_t txChunkSize = 0;
+//		  for (size_t n = 0; n < receivedDataSize; n += 1024){
+//			  if (n + 1024 <= receivedDataSize) {
+//				  txChunkSize = 1024;
+//			  } else {
+//				  txChunkSize = receivedDataSize % 1024;
+//			  }
+//			  HAL_UART_Transmit(&huart3, receivedData+pointer, txChunkSize, 1000);
+//			  pointer += txChunkSize; // Move pointer by size
+//			}
+
+		  uint8_t imageRGB[320*240*3] = {0};
+		  uint32_t imageRGBSize = 320*240*3;
+		  for (size_t i = 0, j = 0; i < receivedDataSize; i += 2, j += 1) {
+			// Read the RGB565 value (2 bytes)
+			uint16_t pixel = (receivedData[i] << 8) | receivedData[i + 1];
+
+			// Extract RGB components from RGB565
+			uint8_t r5 = (pixel >> 11) & 0x1F; // 5 bits for red
+			uint8_t g6 = (pixel >> 5) & 0x3F;  // 6 bits for green
+			uint8_t b5 = pixel & 0x1F;         // 5 bits for blue
+
+			// Convert to 8-bit per channel (RGB888)
+			imageRGB[j] = (r5 << 3) | (r5 >> 2);       // Red
+			imageRGB[IMAGE_WIDTH*IMAGE_HEIGHT + j] = (g6 << 2) | (g6 >> 4);   // Green
+			imageRGB[IMAGE_WIDTH*IMAGE_HEIGHT*2 + j] = (b5 << 3) | (b5 >> 2);   // Blue
+		  }
+//			for (size_t i = 0, j = 0; i < receivedDataSize; i += 2, j += 3) {
+//				// Read the RGB565 value (2 bytes)
+//				uint16_t pixel = (receivedData[i] << 8) | receivedData[i + 1];
+//
+//				// Extract RGB components from RGB565
+//				uint8_t r5 = (pixel >> 11) & 0x1F; // 5 bits for red
+//				uint8_t g6 = (pixel >> 5) & 0x3F;  // 6 bits for green
+//				uint8_t b5 = pixel & 0x1F;         // 5 bits for blue
+//
+//				// Convert to 8-bit per channel (RGB888)
+//				imageRGB[j] = (r5 << 3) | (r5 >> 2);       // Red
+//				imageRGB[j+1] = (g6 << 2) | (g6 >> 4);   // Green
+//				imageRGB[j+2] = (b5 << 3) | (b5 >> 2);   // Blue
+//			}
+
+		  size_t pointer = 0;
+		  uint16_t txChunkSize = 0;
+		  for (size_t n = 0; n < imageRGBSize; n += 1024){
+			  if (n + 1024 <= imageRGBSize) {
+				  txChunkSize = 1024;
+			  } else {
+				  txChunkSize = imageRGBSize % 1024;
+			  }
+			  HAL_UART_Transmit(&huart3, imageRGB+pointer, txChunkSize, 1000);
+			  pointer += txChunkSize; // Move pointer by size
+			}
+
 //		  HAL_StatusTypeDef status = HAL_JPEG_Decode(&hjpeg, receivedData, receivedDataSize, image, imageSize, HAL_MAX_DELAY);
 //		  if (status != HAL_OK) {
 //			  uint8_t txError[1] = {status};
