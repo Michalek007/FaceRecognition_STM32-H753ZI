@@ -23,6 +23,10 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include "mtcnn.h"
+#include "inputs.h"
+#include "cnn.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -35,9 +39,9 @@
 
 #define ENABLE_TEST_PRINT 1
 #define RX_MAX_BUFF_SIZE 1024
-#define IMAGE_SIZE 230400
-#define IMAGE_WIDTH 320
-#define IMAGE_HEIGHT 240
+#define IMAGE_WIDTH 160
+#define IMAGE_HEIGHT 120
+#define CHANNEL_SIZE IMAGE_WIDTH*IMAGE_HEIGHT
 
 /* USER CODE END PD */
 
@@ -87,7 +91,7 @@ uint8_t txBufferGetImage[1] = {255};
 uint8_t txBufferSentImage[1] = {0};
 uint8_t txBufferTest[1] = {1};
 uint8_t enableEcho = 0;
-uint8_t receivedData[320*240*2] = {0};
+uint8_t receivedData[CHANNEL_SIZE*2] = {0};
 //uint8_t receivedData[10000] = {0};
 volatile size_t receivedDataSize = 0;
 uint8_t txNull[5] = {0};
@@ -201,8 +205,8 @@ int main(void)
 //			  pointer += txChunkSize; // Move pointer by size
 //			}
 
-		  uint8_t imageRGB[320*240*3] = {0};
-		  uint32_t imageRGBSize = 320*240*3;
+		  uint8_t imageRGB[CHANNEL_SIZE*3] = {0};
+		  uint32_t imageRGBSize = CHANNEL_SIZE*3;
 		  for (size_t i = 0, j = 0; i < receivedDataSize; i += 2, j += 1) {
 			// Read the RGB565 value (2 bytes)
 			uint16_t pixel = (receivedData[i] << 8) | receivedData[i + 1];
@@ -214,8 +218,8 @@ int main(void)
 
 			// Convert to 8-bit per channel (RGB888)
 			imageRGB[j] = (r5 << 3) | (r5 >> 2);       // Red
-			imageRGB[IMAGE_WIDTH*IMAGE_HEIGHT + j] = (g6 << 2) | (g6 >> 4);   // Green
-			imageRGB[IMAGE_WIDTH*IMAGE_HEIGHT*2 + j] = (b5 << 3) | (b5 >> 2);   // Blue
+			imageRGB[CHANNEL_SIZE + j] = (g6 << 2) | (g6 >> 4);   // Green
+			imageRGB[CHANNEL_SIZE*2 + j] = (b5 << 3) | (b5 >> 2);   // Blue
 		  }
 //			for (size_t i = 0, j = 0; i < receivedDataSize; i += 2, j += 3) {
 //				// Read the RGB565 value (2 bytes)
@@ -232,17 +236,35 @@ int main(void)
 //				imageRGB[j+2] = (b5 << 3) | (b5 >> 2);   // Blue
 //			}
 
-		  size_t pointer = 0;
-		  uint16_t txChunkSize = 0;
-		  for (size_t n = 0; n < imageRGBSize; n += 1024){
-			  if (n + 1024 <= imageRGBSize) {
-				  txChunkSize = 1024;
-			  } else {
-				  txChunkSize = imageRGBSize % 1024;
-			  }
-			  HAL_UART_Transmit(&huart3, imageRGB+pointer, txChunkSize, 1000);
-			  pointer += txChunkSize; // Move pointer by size
-			}
+//		  size_t pointer = 0;
+//		  uint16_t txChunkSize = 0;
+//		  for (size_t n = 0; n < imageRGBSize; n += 1024){
+//			  if (n + 1024 <= imageRGBSize) {
+//				  txChunkSize = 1024;
+//			  } else {
+//				  txChunkSize = imageRGBSize % 1024;
+//			  }
+//			  HAL_UART_Transmit(&huart3, imageRGB+pointer, txChunkSize, 1000);
+//			  pointer += txChunkSize; // Move pointer by size
+//			}
+
+		  uint8_t scaledImage[3*48*64] = {0};
+		  CNN_AdaptiveAveragePool_Uint8_Uint8(3, IMAGE_HEIGHT, IMAGE_WIDTH, 48, 64, imageRGB, scaledImage);
+
+		  float boxes[5*10];
+//		  int boxesLen = MTCNN_DetectFace(3, 50, 50, detectFaceInput, boxes);
+//		  int boxesLen = MTCNN_DetectFace(3, 120, 160, detectFaceInput120_160, boxes);
+//		  int boxesLen = MTCNN_DetectFace(3, 75, 75, detectFaceInput100_100, boxes);
+//		  int boxesLen = MTCNN_DetectFace(3, IMAGE_HEIGHT, IMAGE_WIDTH, imageRGB, boxes);
+		  int boxesLen = MTCNN_DetectFace(3, 48, 64, scaledImage, boxes);
+		  uint8_t outputBuffer[boxesLen*5];
+		  for (size_t i=0;i<boxesLen*5;++i){
+			  outputBuffer[i] = (int) roundf(boxes[i]);
+		  }
+		  HAL_UART_Transmit(&huart3, outputBuffer, boxesLen*5, 1000);
+		  if (boxesLen == 0){
+			  HAL_UART_Transmit(&huart3, txNull, 5, 1000);
+		  }
 
 //		  HAL_StatusTypeDef status = HAL_JPEG_Decode(&hjpeg, receivedData, receivedDataSize, image, imageSize, HAL_MAX_DELAY);
 //		  if (status != HAL_OK) {
@@ -715,11 +737,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		  rxBufferSize = 2;
 		  return;
 	  }
-	  HAL_UART_Receive_IT(&huart2, rxBuffer, rxBufferSize);
+	  HAL_UART_Receive_IT(&huart2, receivedData + receivedDataSize, rxBufferSize);
 	  HAL_UART_Transmit(&huart3, rxBuffer, 2, 100);
   }
   else{
-	  memcpy(receivedData + receivedDataSize, rxBuffer, rxBufferSize);
+//	  memcpy(receivedData + receivedDataSize, rxBuffer, rxBufferSize);
 	  HAL_UART_Receive_IT(&huart2, rxBuffer, 2);
 	  receivedDataSize += rxBufferSize;
 	  rxBufferSize = 2;
