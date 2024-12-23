@@ -265,6 +265,16 @@ int main(void)
 		  if (boxesLen == 0){
 			  HAL_UART_Transmit(&huart3, txNull, 5, 1000);
 		  }
+		  uint8_t finalBoxes[boxesLen*4];
+		  for (size_t i = 0, j =0;i<boxesLen*5;i+=5, j+=4){
+			  finalBoxes[j] = roundf(boxes[i] * 2.5f);
+			  finalBoxes[j+1] = roundf(boxes[i+1] * 2.5f);
+			  finalBoxes[j+2] = roundf(boxes[i+2] * 2.5f);
+			  finalBoxes[j+3] = roundf(boxes[i+3] * 2.5f);
+		  }
+		  uint8_t boxesLenTx[] = {(uint8_t)boxesLen};
+		  HAL_UART_Transmit(&huart2, boxesLenTx, 1, 100);
+		  HAL_UART_Transmit(&huart2, finalBoxes, (uint16_t)boxesLen*4, 100);
 
 //		  HAL_StatusTypeDef status = HAL_JPEG_Decode(&hjpeg, receivedData, receivedDataSize, image, imageSize, HAL_MAX_DELAY);
 //		  if (status != HAL_OK) {
