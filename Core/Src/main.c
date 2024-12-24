@@ -37,11 +37,11 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define ENABLE_TEST_PRINT 1
 #define RX_MAX_BUFF_SIZE 1024
 #define IMAGE_WIDTH 160
 #define IMAGE_HEIGHT 120
 #define CHANNEL_SIZE IMAGE_WIDTH*IMAGE_HEIGHT
+#define TESTING 1
 
 /* USER CODE END PD */
 
@@ -83,7 +83,8 @@ PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 /* USER CODE BEGIN PV */
 
-uint8_t rxBuffer[RX_MAX_BUFF_SIZE] = {0};
+//uint8_t rxBuffer[RX_MAX_BUFF_SIZE] = {0};
+uint8_t rxBuffer[2] = {0};
 volatile uint8_t rxDone = 0;
 volatile uint8_t rxInProgress = 0;
 volatile uint16_t rxBufferSize = 2;
@@ -94,6 +95,7 @@ uint8_t enableEcho = 0;
 uint8_t receivedData[CHANNEL_SIZE*2] = {0};
 //uint8_t receivedData[10000] = {0};
 volatile size_t receivedDataSize = 0;
+volatile uint32_t lastTick = 0;
 uint8_t txNull[5] = {0};
 
 //uint8_t image[320*240*3] = {0};
@@ -187,7 +189,6 @@ int main(void)
 //    	  }
 //    	  HAL_Delay(2000);
 //      }
-
 	  if (rxDone){
 		  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
 //		  HAL_UART_Transmit(&huart3, txNull, 5, 100);
@@ -257,25 +258,30 @@ int main(void)
 //		  int boxesLen = MTCNN_DetectFace(3, 75, 75, detectFaceInput100_100, boxes);
 //		  int boxesLen = MTCNN_DetectFace(3, IMAGE_HEIGHT, IMAGE_WIDTH, imageRGB, boxes);
 		  int boxesLen = MTCNN_DetectFace(3, 48, 64, scaledImage, boxes);
-		  uint8_t outputBuffer[boxesLen*5];
-		  for (size_t i=0;i<boxesLen*5;++i){
-			  outputBuffer[i] = (int) roundf(boxes[i]);
+
+		  if (TESTING){
+			  uint8_t outputBuffer[boxesLen*5];
+			  for (size_t i=0;i<boxesLen*5;++i){
+				  outputBuffer[i] = roundf(boxes[i]);
+			  }
+			  HAL_UART_Transmit(&huart3, outputBuffer, boxesLen*5, 100);
+			  if (boxesLen == 0){
+				  HAL_UART_Transmit(&huart3, txNull, 5, 100);
+			  }
 		  }
-		  HAL_UART_Transmit(&huart3, outputBuffer, boxesLen*5, 1000);
-		  if (boxesLen == 0){
-			  HAL_UART_Transmit(&huart3, txNull, 5, 1000);
-		  }
-		  uint8_t finalBoxes[boxesLen*4];
-		  for (size_t i = 0, j =0;i<boxesLen*5;i+=5, j+=4){
-			  finalBoxes[j] = roundf(boxes[i] * 2.5f);
-			  finalBoxes[j+1] = roundf(boxes[i+1] * 2.5f);
-			  finalBoxes[j+2] = roundf(boxes[i+2] * 2.5f);
-			  finalBoxes[j+3] = roundf(boxes[i+3] * 2.5f);
-		  }
+
 		  uint8_t boxesLenTx[] = {(uint8_t)boxesLen};
 		  HAL_UART_Transmit(&huart2, boxesLenTx, 1, 100);
-		  HAL_UART_Transmit(&huart2, finalBoxes, (uint16_t)boxesLen*4, 100);
-
+		  if (boxesLen > 0){
+			  uint8_t finalBoxes[boxesLen*4];
+			  for (size_t i = 0, j =0;i<boxesLen*5;i+=5, j+=4){
+				  finalBoxes[j] = roundf(boxes[i] * 2.5f);
+				  finalBoxes[j+1] = roundf(boxes[i+1] * 2.5f);
+				  finalBoxes[j+2] = roundf(boxes[i+2] * 2.5f);
+				  finalBoxes[j+3] = roundf(boxes[i+3] * 2.5f);
+			  }
+			  HAL_UART_Transmit(&huart2, finalBoxes, (uint16_t)boxesLen*4, 100);
+		  }
 //		  HAL_StatusTypeDef status = HAL_JPEG_Decode(&hjpeg, receivedData, receivedDataSize, image, imageSize, HAL_MAX_DELAY);
 //		  if (status != HAL_OK) {
 //			  uint8_t txError[1] = {status};
@@ -297,6 +303,9 @@ int main(void)
 //		  }
 		  rxDone = 0;
 		  receivedDataSize = 0;
+	  }
+	  if (HAL_GetTick() - lastTick >= 1000 && rxInProgress){
+		  HAL_UART_AbortReceive_IT(&huart2);
 	  }
 	  if (enableEcho){
 		  HAL_StatusTypeDef error = HAL_UART_Receive(&huart2, rxBuffer, 1, 100);
@@ -739,6 +748,14 @@ static void MX_GPIO_Init(void)
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
+//  if (rxBufferSize == 4){
+//	  rxBufferSize = ((uint32_t)rxBuffer[0] << 32) | ((uint32_t)rxBuffer[1] << 16) | ((uint32_t)rxBuffer[2] << 8) | (uint32_t)rxBuffer[3];
+//	  HAL_UART_Receive_IT(&huart2, receivedData + receivedDataSize, rxBufferSize);
+//	  HAL_UART_Transmit(&huart3, rxBuffer, 4, 100);
+//  }
+//  else{
+//
+//  }
   if (rxBufferSize == 2){
 	  rxBufferSize = ((uint16_t)rxBuffer[0] << 8) | (uint16_t)rxBuffer[1];
 	  if (!rxBufferSize){
@@ -748,14 +765,16 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 		  return;
 	  }
 	  HAL_UART_Receive_IT(&huart2, receivedData + receivedDataSize, rxBufferSize);
-	  HAL_UART_Transmit(&huart3, rxBuffer, 2, 100);
+	  if (TESTING){
+		  HAL_UART_Transmit(&huart3, rxBuffer, 2, 100);
+	  }
   }
   else{
-//	  memcpy(receivedData + receivedDataSize, rxBuffer, rxBufferSize);
 	  HAL_UART_Receive_IT(&huart2, rxBuffer, 2);
 	  receivedDataSize += rxBufferSize;
 	  rxBufferSize = 2;
   }
+  lastTick = HAL_GetTick();
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
@@ -764,12 +783,17 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	  if (!rxInProgress){
 		  HAL_StatusTypeDef error = HAL_UART_Receive_IT(&huart2, rxBuffer, rxBufferSize);
 		  if (error == HAL_ERROR || error == HAL_BUSY){
-			  uint8_t txError[1] = {error};
-			  HAL_UART_Transmit(&huart3, txError, 1, 100);
+			  if (TESTING){
+				  uint8_t txError[1] = {error};
+				  HAL_UART_Transmit(&huart3, txError, 1, 100);
+			  }
 			  return;
 		  }
 		  HAL_UART_Transmit(&huart2, txBufferGetImage, 1, 100);
-		  HAL_UART_Transmit(&huart3, txBufferGetImage, 1, 100);
+		  if (TESTING){
+			  HAL_UART_Transmit(&huart3, txBufferGetImage, 1, 100);
+		  }
+		  lastTick = HAL_GetTick();
 		  rxInProgress = 1;
 	  }
   }
@@ -777,16 +801,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	  if (!rxInProgress){
 		  HAL_ADC_Start(&hadc1);
 	      if (HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY) == HAL_OK) {
-	          // Get the ADC value
 	    	  adcValue = HAL_ADC_GetValue(&hadc1);
 	    	  if (adcValue <= 255){
 	    		  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_SET);
 	    	  }
 
-	          // Use adcValue as needed
 	          uint8_t txADC[2] = {0};
-	    	  txADC[0] = (adcValue >> 8) & 0xFF;  // Extract the higher 8 bits
-	    	  txADC[1] = adcValue & 0xFF;         // Extract the lowest 8 bits
+	    	  txADC[0] = (adcValue >> 8) & 0xFF;
+	    	  txADC[1] = adcValue & 0xFF;
 	    	  HAL_UART_Transmit(&huart3, txADC, 2, 100);
 	      }
 		  HAL_StatusTypeDef error = HAL_UART_Receive_IT(&huart2, rxBuffer, rxBufferSize);
@@ -802,6 +824,17 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   } else {
       __NOP();
   }
+}
+
+void HAL_UART_AbortReceiveCpltCallback(UART_HandleTypeDef *huart){
+	rxDone = 0;
+	rxInProgress = 0;
+    rxBufferSize = 2;
+
+    if (TESTING){
+    	uint8_t txAbortReceive[1] = {1};
+		HAL_UART_Transmit(&huart3, txAbortReceive, 1, 100);
+    }
 }
 
 /* USER CODE END 4 */
