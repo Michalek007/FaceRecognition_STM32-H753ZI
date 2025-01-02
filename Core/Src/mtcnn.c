@@ -5,6 +5,8 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <assert.h>
 #include "mtcnn.h"
 #include "cnn.h"
 #include "pnet.h"
@@ -41,37 +43,7 @@ int MTCNN_DetectFace(size_t inputChannels, size_t inputHeight, size_t inputWidth
         size_t outputHeight = inputHeight*scales[i]+1;
         size_t outputWidth = inputWidth*scales[i]+1;
         float scaledOutput[inputChannels*outputHeight*outputWidth];
-        CNN_AdaptiveAveragePool_Uint8(inputChannels, inputHeight, inputWidth, outputHeight, outputWidth, input, scaledOutput);
-//        if (i == 0){
-//            for (size_t j=0;j<11163;++j){
-//                printf("Output [%d]: %f\n", j, scaledOutput[j]);
-//                assert(equalFloatDefault(scaledOutput[j], expectedOutput0[j]));
-//            }
-//        }
-//        else if (i == 1){
-//            for (size_t j=0;j<5547;++j){
-//                printf("Output [%d]: %f\n", j, scaledOutput[j]);
-//                assert(equalFloatDefault(scaledOutput[j], expectedOutput1[j]));
-//            }
-//        }
-//        else if (i == 2){
-//            for (size_t j=0;j<2883;++j){
-//                printf("Output [%d]: %f\n", j, scaledOutput[j]);
-//                assert(equalFloatDefault(scaledOutput[j], expectedOutput2[j]));
-//            }
-//        }
-//        else if (i == 3){
-//            for (size_t j=0;j<1452;++j){
-//                printf("Output [%d]: %f\n", j, scaledOutput[j]);
-//                assert(equalFloatDefault(scaledOutput[j], expectedOutput3[j]));
-//            }
-//        }
-//        else if (i == 4){
-//            for (size_t j=0;j<768;++j){
-//                printf("Output [%d]: %f\n", j, scaledOutput[j]);
-//                assert(equalFloatDefault(scaledOutput[j], expectedOutput4[j]));
-//            }
-//        }
+        CNN_AdaptiveAveragePool_Uint8_Float(inputChannels, inputHeight, inputWidth, outputHeight, outputWidth, input, scaledOutput);
         for (size_t j=0;j<inputChannels*outputHeight*outputWidth;++j){
             scaledOutput[j] = (scaledOutput[j] - 127.5f) * 0.0078125f;
         }
@@ -87,49 +59,12 @@ int MTCNN_DetectFace(size_t inputChannels, size_t inputHeight, size_t inputWidth
 //        size_t outputBoxMaxSize = 9*maxBoxesPerScale;
         float outputBox[outputBoxMaxSize];
         size_t boxesLen = MTCNN_GenerateBoundingBox(regOutputHeight, regOutputWidth, outputReg, outputProb, scales[i], thresholdPNet, outputBox);
-
-//        if (i == 0){
-//            for (size_t j=0;j<18;++j){
-//                printf("Output [%d]: %f\n", j, outputBox[j]);
-//                assert(equalFloatDefault(outputBox[j], expectedOutput01[j]));
-//            }
-//        }
-//        else if (i == 1){
-//            for (size_t j=0;j<18;++j){
-//                printf("Output [%d]: %f\n", j, outputBox[j]);
-//                assert(equalFloatDefault(outputBox[j], expectedOutput11[j]));
-//            }
-//        }
-//        else if (i == 2){
-//            for (size_t j=0;j<36;++j){
-//                printf("Output [%d]: %f\n", j, outputBox[j]);
-//                assert(equalFloatDefault(outputBox[j], expectedOutput21[j]));
-//            }
-//        }
-//        else if (i == 3){
-//            for (size_t j=0;j<36;++j){
-//                printf("Output [%d]: %f\n", j, outputBox[j]);
-//                assert(equalFloatDefault(outputBox[j], expectedOutput31[j]));
-//            }
-//        }
-//        else if (i == 4){
-//            for (size_t j=0;j<9;++j){
-//                printf("Output [%d]: %f\n", j, outputBox[j]);
-//                assert(equalFloatDefault(outputBox[j], expectedOutput41[j]));
-//            }
-//        }
         currentBoxesCount += MTCNN_BoxNms(boxesLen, outputBox, iouThresholdPNet0, boxes+currentBoxesCount*9);
-//        free(scaledOutput);
     }
     if (currentBoxesCount == 0)
         return 0;
 
     currentBoxesCount = MTCNN_BoxNms(currentBoxesCount, boxes, iouThresholdPNet1, boxes);
-//    float expectedOutput[] = {51.0, 21.0, 70.0, 40.0, 0.9039, -0.03787, 0.01272, 0.00483, 0.22522, 54.0, 28.0, 73.0, 46.0, 0.95487, -0.05535, 0.12994, -0.09492, 0.26756, 44.0, 25.0, 70.0, 51.0, 0.92829, 0.11208, 0.01449, 0.05255, 0.14467, 43.0, 29.0, 79.0, 66.0, 0.97301, 0.02569, -0.03714, -0.10525, 0.06338, 23.0, 23.0, 74.0, 74.0, 0.99966, 0.03534, -0.03008, -0.0268, 0.10018, 19.0, 19.0, 92.0, 92.0, 0.99322, 0.09031, 0.02829, -0.19878, 0.00652};
-//    for (size_t i=0;i<54;++i){
-//        printf("Output [%d]: %f\n", i, boxes[i]);
-//        assert(equalFloatDefault(boxes[i], expectedOutput[i]));
-//    }
 
     size_t outputIndex = 0;
     for (size_t i=0;i<currentBoxesCount*9;i+=9) {
@@ -142,11 +77,7 @@ int MTCNN_DetectFace(size_t inputChannels, size_t inputHeight, size_t inputWidth
         boxes[outputIndex+4] = boxes[i+4];
         outputIndex += 5;
     }
-//    float expectedOutput[] = {50.28052, 21.24174, 70.09169, 44.27912, 0.9039, 52.94841, 30.33889, 71.19657, 50.81613, 0.95487,46.91397, 25.37681, 71.36622, 54.7613, 0.92829, 43.92469, 27.62577, 75.2111, 68.34497, 0.97301, 24.80256, 21.46568, 72.63345, 79.10918, 0.99966, 25.59233, 21.06518, 77.4894, 92.47623, 0.99322};
-//    for (size_t i=0;i<30;++i){
-//        printf("Output [%d]: %f\n", i, boxes[i]);
-//        assert(equalFloatDefault(boxes[i], expectedOutput[i]));
-//    }
+
     MTCNN_Rerec(currentBoxesCount, boxes);
     int padArray[currentBoxesCount*4];
     MTCNN_Pad(inputHeight, inputWidth, currentBoxesCount, boxes, padArray);
@@ -171,66 +102,15 @@ int MTCNN_DetectFace(size_t inputChannels, size_t inputHeight, size_t inputWidth
                 memcpy(newInput+newInputIndex, input+inputIndex, newWidth*sizeof(uint8_t));
             }
         }
-//        if (i/4 == 0){
-//            for (size_t k=0;k<1728;++k){
-//                printf("Output [%d]: %f\n", k, newInput[k]);
-//                assert(equalFloatDefault(newInput[k], expectedOutput02[k]));
-//            }
-//        }
-//        else if (i/4 == 1){
-//            for (size_t k=0;k<1386;++k){
-//                printf("Output [%d]: %f\n", k, newInput[k]);
-//                assert(equalFloatDefault(newInput[k], expectedOutput12[k]));
-//            }
-//        }
-//        else if (i/4 == 2){
-//            for (size_t k=0;k<2700;++k){
-//                printf("Output [%d]: %f\n", k, newInput[k]);
-//                assert(equalFloatDefault(newInput[k], expectedOutput22[k]));
-//            }
-//        }
-//        else if (i/4 == 3){
-//            for (size_t k=0;k<5166;++k){
-//                printf("Output [%d]: %f\n", k, newInput[k]);
-//                assert(equalFloatDefault(newInput[k], expectedOutput32[k]));
-//            }
-//        }
-//        else if (i/4 == 4){
-//            for (size_t k=0;k<10443;++k){
-//                printf("Output [%d]: %f\n", k, newInput[k]);
-//                assert(equalFloatDefault(newInput[k], expectedOutput42[k]));
-//            }
-//        }
-//        else if (i/4 == 5){
-//            for (size_t k=0;k<15768;++k){
-//                printf("Output [%d]: %f\n", k, newInput[k]);
-//                assert(equalFloatDefault(newInput[k], expectedOutput52[k]));
-//            }
-//        }
+
         float scaledInput[inputChannels*24*24];
-        CNN_AdaptiveAveragePool_Uint8(inputChannels, newHeight, newWidth, 24, 24, newInput, scaledInput);
-//        if (i/4 == 1){
-//            for (size_t k=0;k<1728;++k){
-//                printf("Output [%d]: %f\n", k, scaledInput[k]);
-//                assert(equalFloatDefault(scaledInput[k], expectedOutput03[k]));
-//            }
-//        }
+        CNN_AdaptiveAveragePool_Uint8_Float(inputChannels, newHeight, newWidth, 24, 24, newInput, scaledInput);
         for (size_t j=0;j<inputChannels*24*24;++j){
             scaledInput[j] = (scaledInput[j] - 127.5f) * 0.0078125f;
         }
         RNet_Model(scaledInput, outputReg+4*currentRegCount, outputProb+2*currentRegCount);
         ++currentRegCount;
     }
-//    float expectedOutput04[] = {-0.12459, -0.0593, 0.22122, 0.73505, -0.11502, -0.12154, 0.21121, 0.48961, -0.05304, -0.05735, 0.13819, 0.47433, -0.18486, -0.1617, -0.14764, 0.19548,  0.03958, -0.02145, -0.11738, -0.0546, 0.1054, -0.01394, -0.18461, -0.1425};
-//    for (size_t i=0;i<24;++i){
-//        printf("Output [%d]: %f\n", i, outputReg[i]);
-//        assert(equalFloatDefault(outputReg[i], expectedOutput04[i]));
-//    }
-//    float expectedOutput14[] = {0.99771, 0.00229, 0.99613, 0.00387, 0.99804, 0.00196, 0.09634, 0.90366, 0.00044, 0.99956, 0.00296, 0.99704};
-//    for (size_t i=0;i<12;++i){
-//        printf("Output [%d]: %f\n", i, outputProb[i]);
-//        assert(equalFloatDefault(outputProb[i], expectedOutput14[i]));
-//    }
 
     currentBoxesCount = 0;
     for(size_t i=0;i<currentRegCount;++i){
@@ -249,16 +129,6 @@ int MTCNN_DetectFace(size_t inputChannels, size_t inputHeight, size_t inputWidth
             ++currentBoxesCount;
         }
     }
-//    float expectedOutput05[] = {39.20829, 27.62577, 79.92749, 68.34497, 0.90366, 19.89625, 21.46569, 77.53975, 79.10919, 0.99956, 15.83533, 21.06518, 87.24639, 92.47623, 0.99704};
-//    for (size_t i=0;i<15;++i){
-//        printf("Output [%d]: %f\n", i, boxes[i]);
-//        assert(equalFloatDefault(boxes[i], expectedOutput05[i]));
-//    }
-//    float expectedOutput15[] = { -0.18486, -0.1617, -0.14764, 0.19548, 0.03958, -0.02145, -0.11738, -0.0546, 0.1054, -0.01394, -0.18461, -0.1425};
-//    for (size_t i=0;i<12;++i){
-//        printf("Output [%d]: %f\n", i, outputReg[i]);
-//        assert(equalFloatDefault(outputReg[i], expectedOutput15[i]));
-//    }
     int boxIndexes[currentBoxesCount];
     currentBoxesCount = MTCNN_BoxNmsIdx(currentBoxesCount, boxes, iouThresholdRNet, boxIndexes);
     for (size_t i=0;i<currentBoxesCount;++i){
@@ -280,11 +150,6 @@ int MTCNN_DetectFace(size_t inputChannels, size_t inputHeight, size_t inputWidth
         boxes[boxesIndex+2] = boxes[boxesIndex+2] + outputReg[regIndex+2] * w;
         boxes[boxesIndex+3] = boxes[boxesIndex+3] + outputReg[regIndex+3] * h;
     }
-//    float expectedOutput06[] = {22.21715, 20.20803, 70.65629, 75.90701, 0.99956};
-//    for (size_t i=0;i<5;++i){
-//        printf("Output [%d]: %f\n", i, boxes[i]);
-//        assert(equalFloat(boxes[i], expectedOutput06[i], 0.01f));
-//    }
     MTCNN_Rerec(currentBoxesCount, boxes);
     for (size_t i=0;i<currentBoxesCount*5;i+=5) {
         for (size_t j=0;j<5;++j){

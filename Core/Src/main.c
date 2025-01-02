@@ -21,8 +21,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <string.h>
 #include "mtcnn.h"
 #include "cnn.h"
+#include "lite_face.h"
 
 /* USER CODE END Includes */
 
@@ -38,6 +40,7 @@
 #define IMAGE_WIDTH 160
 #define IMAGE_HEIGHT 120
 #define CHANNEL_SIZE IMAGE_WIDTH*IMAGE_HEIGHT
+#define MAX_DETECTED_FACES 10
 #define TESTING 1
 
 /* USER CODE END PD */
@@ -87,7 +90,7 @@ static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
-
+void sendArrayUART(UART_HandleTypeDef *huart, const uint8_t *array, uint32_t arraySize);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -192,20 +195,6 @@ int main(void)
 			imageRGB[CHANNEL_SIZE + j] = (g6 << 2) | (g6 >> 4);   // Green
 			imageRGB[CHANNEL_SIZE*2 + j] = (b5 << 3) | (b5 >> 2);   // Blue
 		  }
-//			for (size_t i = 0, j = 0; i < receivedDataSize; i += 2, j += 3) {
-//				// Read the RGB565 value (2 bytes)
-//				uint16_t pixel = (receivedData[i] << 8) | receivedData[i + 1];
-//
-//				// Extract RGB components from RGB565
-//				uint8_t r5 = (pixel >> 11) & 0x1F; // 5 bits for red
-//				uint8_t g6 = (pixel >> 5) & 0x3F;  // 6 bits for green
-//				uint8_t b5 = pixel & 0x1F;         // 5 bits for blue
-//
-//				// Convert to 8-bit per channel (RGB888)
-//				imageRGB[j] = (r5 << 3) | (r5 >> 2);       // Red
-//				imageRGB[j+1] = (g6 << 2) | (g6 >> 4);   // Green
-//				imageRGB[j+2] = (b5 << 3) | (b5 >> 2);   // Blue
-//			}
 
 //		  size_t pointer = 0;
 //		  uint16_t txChunkSize = 0;
@@ -223,10 +212,6 @@ int main(void)
 		  CNN_AdaptiveAveragePool_Uint8_Uint8(3, IMAGE_HEIGHT, IMAGE_WIDTH, 48, 64, imageRGB, scaledImage);
 
 		  float boxes[5*10];
-//		  int boxesLen = MTCNN_DetectFace(3, 50, 50, detectFaceInput, boxes);
-//		  int boxesLen = MTCNN_DetectFace(3, 120, 160, detectFaceInput120_160, boxes);
-//		  int boxesLen = MTCNN_DetectFace(3, 75, 75, detectFaceInput100_100, boxes);
-//		  int boxesLen = MTCNN_DetectFace(3, IMAGE_HEIGHT, IMAGE_WIDTH, imageRGB, boxes);
 		  int boxesLen = MTCNN_DetectFace(3, 48, 64, scaledImage, boxes);
 
 		  if (TESTING){
@@ -244,33 +229,48 @@ int main(void)
 		  HAL_UART_Transmit(&huart2, boxesLenTx, 1, 100);
 		  if (boxesLen > 0){
 			  uint8_t finalBoxes[boxesLen*4];
-			  for (size_t i = 0, j =0;i<boxesLen*5;i+=5, j+=4){
+			  for (size_t i=0, j=0;i<boxesLen*5;i+=5, j+=4){
 				  finalBoxes[j] = roundf(boxes[i] * 2.5f);
 				  finalBoxes[j+1] = roundf(boxes[i+1] * 2.5f);
 				  finalBoxes[j+2] = roundf(boxes[i+2] * 2.5f);
 				  finalBoxes[j+3] = roundf(boxes[i+3] * 2.5f);
 			  }
 			  HAL_UART_Transmit(&huart2, finalBoxes, (uint16_t)boxesLen*4, 100);
+
+			  for (size_t i=0;i<boxesLen*4;i+=4){
+				size_t start = finalBoxes[i * 4] + finalBoxes[i * 4 + 1] * IMAGE_WIDTH;
+				size_t width = finalBoxes[i * 4 + 2] - finalBoxes[i * 4];
+				size_t height = finalBoxes[i * 4 + 3] - finalBoxes[i * 4 + 1];
+				uint8_t alignedImage[3*height*width];
+				for (uint8_t o=0;o<3;++o){
+					for (size_t j=0; j<height;++j){
+						memcpy(alignedImage, imageRGB + CHANNEL_SIZE*o + start + (j*IMAGE_WIDTH), width);
+					}
+				}
+
+				float scaledAlignedImage[3*100*100];
+				CNN_AdaptiveAveragePool_Uint8_Float(3, height, width, 100, 100, alignedImage, scaledAlignedImage);
+				if (TESTING){
+					HAL_UART_Transmit(&huart3, txNull, 5, 100);
+//					sendArrayUART(&huart3, alignedImage, 3*height*width);
+//					sendArrayUART(&huart3, scaledAlignedImage, 3*100*100);
+				}
+				const float means[3] = {0.5f, 0.5f, 0.5f};
+				const float stds[3] = {0.5f, 0.5f, 0.5f};
+				CNN_Normalize(3, 100, 100, scaledAlignedImage, means, stds);
+				float faceEmbedding[128];
+				LiteFace_Model(scaledAlignedImage, faceEmbedding);
+				if (TESTING){
+					HAL_UART_Transmit(&huart3, txNull, 5, 100);
+					uint8_t txEmbedding[128] = {0};
+					for (uint8_t i=0;i<128;++i){
+						txEmbedding[i] = faceEmbedding[i] * 100;
+					}
+					HAL_UART_Transmit(&huart3, txEmbedding, 128, 500);
+				}
+			  }
 		  }
-//		  HAL_StatusTypeDef status = HAL_JPEG_Decode(&hjpeg, receivedData, receivedDataSize, image, imageSize, HAL_MAX_DELAY);
-//		  if (status != HAL_OK) {
-//			  uint8_t txError[1] = {status};
-//			  HAL_UART_Transmit(&huart3, txError, 1, 100);
-//		  }
-//		  else{
-//			  size_t imagePointer = 0;
-//			  HAL_UART_Transmit(&huart3, txNull, 5, 100);
-//			  uint16_t txChunkSize = 0;
-//			  for (size_t n = 0; n < imageSize; n += 1024){
-//			      if (n + 1024 <= imageSize) {
-//			    	  txChunkSize = 1024;
-//			      } else {
-//			    	  txChunkSize = imageSize % 1024;
-//			      }
-//				  HAL_UART_Transmit(&huart3, image+imagePointer, txChunkSize, 1000);
-//				  imagePointer += txChunkSize; // Move pointer by size
-//			    }
-//		  }
+
 		  rxDone = 0;
 		  receivedDataSize = 0;
 	  }
@@ -730,6 +730,20 @@ void HAL_UART_AbortReceiveCpltCallback(UART_HandleTypeDef *huart){
     	uint8_t txAbortReceive[1] = {1};
 		HAL_UART_Transmit(&huart3, txAbortReceive, 1, 100);
     }
+}
+
+void sendArrayUART(UART_HandleTypeDef *huart, const uint8_t *array, uint32_t arraySize){
+	size_t pointer = 0;
+	uint16_t txChunkSize = 0;
+	for (size_t n = 0; n < arraySize; n += 1024){
+	  if (n + 1024 <= arraySize) {
+		  txChunkSize = 1024;
+	  } else {
+		  txChunkSize = arraySize % 1024;
+	  }
+	  HAL_UART_Transmit(huart, array+pointer, txChunkSize, 1000);
+	  pointer += txChunkSize; // Move pointer by size
+	}
 }
 
 /* USER CODE END 4 */
