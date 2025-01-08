@@ -41,6 +41,7 @@
 #define IMAGE_HEIGHT 120
 #define CHANNEL_SIZE IMAGE_WIDTH*IMAGE_HEIGHT
 #define MAX_DETECTED_FACES 10
+#define MODE 0
 #define TESTING 1
 
 /* USER CODE END PD */
@@ -134,6 +135,7 @@ int main(void)
 
   HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
 
+  HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -143,44 +145,13 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-//      // Wait for ADC conversion to complete
-//	  HAL_ADC_Start(&hadc1);
-//      if (HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY) == HAL_OK) {
-//          // Get the ADC value
-//    	  adcValue = HAL_ADC_GetValue(&hadc1);
-//
-//          // Use adcValue as needed
-//          uint8_t txADC[2] = {0};
-//    	  txADC[0] = (adcValue >> 8) & 0xFF;  // Extract the higher 8 bits
-//    	  txADC[1] = adcValue & 0xFF;         // Extract the lowest 8 bits
-//    	  HAL_UART_Transmit(&huart3, txADC, 2, 100);
-//    	  if (adcValue <= 255){
-//    		  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_SET);
-//    	  }
-//    	  else{
-//    		  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
-//    	  }
-//    	  HAL_Delay(2000);
-//      }
 	  if (rxDone){
 		  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
-//		  HAL_UART_Transmit(&huart3, txNull, 5, 100);
-//		  HAL_UART_Transmit(&huart3, receivedData, receivedDataSize, 5000);
-//		  size_t pointer = 0;
-//		  HAL_UART_Transmit(&huart3, txNull, 5, 100);
-//		  uint16_t txChunkSize = 0;
-//		  for (size_t n = 0; n < receivedDataSize; n += 1024){
-//			  if (n + 1024 <= receivedDataSize) {
-//				  txChunkSize = 1024;
-//			  } else {
-//				  txChunkSize = receivedDataSize % 1024;
-//			  }
-//			  HAL_UART_Transmit(&huart3, receivedData+pointer, txChunkSize, 1000);
-//			  pointer += txChunkSize; // Move pointer by size
-//			}
+		  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+		  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 
 		  uint8_t imageRGB[CHANNEL_SIZE*3] = {0};
-		  uint32_t imageRGBSize = CHANNEL_SIZE*3;
+//		  uint32_t imageRGBSize = CHANNEL_SIZE*3;
 		  for (size_t i = 0, j = 0; i < receivedDataSize; i += 2, j += 1) {
 			// Read the RGB565 value (2 bytes)
 			uint16_t pixel = (receivedData[i] << 8) | receivedData[i + 1];
@@ -195,18 +166,6 @@ int main(void)
 			imageRGB[CHANNEL_SIZE + j] = (g6 << 2) | (g6 >> 4);   // Green
 			imageRGB[CHANNEL_SIZE*2 + j] = (b5 << 3) | (b5 >> 2);   // Blue
 		  }
-
-//		  size_t pointer = 0;
-//		  uint16_t txChunkSize = 0;
-//		  for (size_t n = 0; n < imageRGBSize; n += 1024){
-//			  if (n + 1024 <= imageRGBSize) {
-//				  txChunkSize = 1024;
-//			  } else {
-//				  txChunkSize = imageRGBSize % 1024;
-//			  }
-//			  HAL_UART_Transmit(&huart3, imageRGB+pointer, txChunkSize, 1000);
-//			  pointer += txChunkSize; // Move pointer by size
-//			}
 
 		  uint8_t scaledImage[3*48*64] = {0};
 		  CNN_AdaptiveAveragePool_Uint8_Uint8(3, IMAGE_HEIGHT, IMAGE_WIDTH, 48, 64, imageRGB, scaledImage);
@@ -226,7 +185,9 @@ int main(void)
 		  }
 
 		  uint8_t boxesLenTx[] = {(uint8_t)boxesLen};
-		  HAL_UART_Transmit(&huart2, boxesLenTx, 1, 100);
+		  if (boxesLen == 0 || MODE == 0){
+			  HAL_UART_Transmit(&huart2, boxesLenTx, 1, 100);
+		  }
 		  if (boxesLen > 0){
 			  uint8_t finalBoxes[boxesLen*4];
 			  for (size_t i=0, j=0;i<boxesLen*5;i+=5, j+=4){
@@ -235,44 +196,70 @@ int main(void)
 				  finalBoxes[j+2] = roundf(boxes[i+2] * 2.5f);
 				  finalBoxes[j+3] = roundf(boxes[i+3] * 2.5f);
 			  }
-			  HAL_UART_Transmit(&huart2, finalBoxes, (uint16_t)boxesLen*4, 100);
-
-			  for (size_t i=0;i<boxesLen*4;i+=4){
-				size_t start = finalBoxes[i * 4] + finalBoxes[i * 4 + 1] * IMAGE_WIDTH;
-				size_t width = finalBoxes[i * 4 + 2] - finalBoxes[i * 4];
-				size_t height = finalBoxes[i * 4 + 3] - finalBoxes[i * 4 + 1];
-				uint8_t alignedImage[3*height*width];
-				for (uint8_t o=0;o<3;++o){
-					for (size_t j=0; j<height;++j){
-						memcpy(alignedImage, imageRGB + CHANNEL_SIZE*o + start + (j*IMAGE_WIDTH), width);
-					}
-				}
-
-				float scaledAlignedImage[3*100*100];
-				CNN_AdaptiveAveragePool_Uint8_Float(3, height, width, 100, 100, alignedImage, scaledAlignedImage);
-				if (TESTING){
-					HAL_UART_Transmit(&huart3, txNull, 5, 100);
-//					sendArrayUART(&huart3, alignedImage, 3*height*width);
-//					sendArrayUART(&huart3, scaledAlignedImage, 3*100*100);
-				}
-				const float means[3] = {0.5f, 0.5f, 0.5f};
-				const float stds[3] = {0.5f, 0.5f, 0.5f};
-				CNN_Normalize(3, 100, 100, scaledAlignedImage, means, stds);
-				float faceEmbedding[128];
-				LiteFace_Model(scaledAlignedImage, faceEmbedding);
-				if (TESTING){
-					HAL_UART_Transmit(&huart3, txNull, 5, 100);
-					uint8_t txEmbedding[128] = {0};
-					for (uint8_t i=0;i<128;++i){
-						txEmbedding[i] = faceEmbedding[i] * 100;
-					}
-					HAL_UART_Transmit(&huart3, txEmbedding, 128, 500);
-				}
+			  if (MODE == 0){
+				  HAL_UART_Transmit(&huart2, finalBoxes, (uint16_t)boxesLen*4, 100);
 			  }
+			if (MODE == 1){
+				for (size_t i=0;i<boxesLen*4;i+=4){
+					size_t start = finalBoxes[i * 4] + finalBoxes[i * 4 + 1] * IMAGE_WIDTH;
+					size_t width = finalBoxes[i * 4 + 2] - finalBoxes[i * 4];
+					size_t height = finalBoxes[i * 4 + 3] - finalBoxes[i * 4 + 1];
+					uint8_t alignedImage[3*height*width];
+					for (uint8_t o=0;o<3;++o){
+						for (size_t j=0; j<height;++j){
+							memcpy(alignedImage, imageRGB + CHANNEL_SIZE*o + start + (j*IMAGE_WIDTH), width);
+						}
+					}
+
+					float scaledAlignedImage[3*100*100];
+					CNN_AdaptiveAveragePool_Uint8_Float(3, height, width, 100, 100, alignedImage, scaledAlignedImage);
+					for (size_t j=0;j<3*100*100;++j){
+						scaledAlignedImage /= 255;
+					}
+					if (TESTING){
+						HAL_UART_Transmit(&huart3, txNull, 5, 100);
+					//					sendArrayUART(&huart3, alignedImage, 3*height*width);
+					//					sendArrayUART(&huart3, scaledAlignedImage, 3*100*100);
+					}
+					const float means[3] = {0.5f, 0.5f, 0.5f};
+					const float stds[3] = {0.5f, 0.5f, 0.5f};
+					CNN_Normalize(3, 100, 100, scaledAlignedImage, means, stds);
+					float faceEmbedding[128];
+					LiteFace_Model(scaledAlignedImage, faceEmbedding);
+
+					uint8_t embeddingLenTx[1] = {128};
+					HAL_UART_Transmit(&huart2, embeddingLenTx, 1, 100);
+					if (TESTING){
+						HAL_UART_Transmit(&huart3, embeddingLenTx, 1, 100);
+					}
+					uint8_t txEmbedding[128*4] = {0};
+					for (uint8_t i=0;i<128;++i){
+						uint32_t temp = 0;
+						memcpy(&temp, &faceEmbedding[i], sizeof(float));
+
+						// Convert the uint32_t to big-endian and store in the output array
+						txEmbedding[i * 4] = (temp >> 24) & 0xFF;
+						txEmbedding[i * 4 + 1] = (temp >> 16) & 0xFF;
+						txEmbedding[i * 4 + 2] = (temp >> 8) & 0xFF;
+						txEmbedding[i * 4 + 3] = temp & 0xFF;
+					}
+					HAL_UART_Transmit(&huart2, txEmbedding, 512, 1000);
+					if (TESTING){
+						HAL_UART_Transmit(&huart3, txNull, 5, 100);
+					//						uint8_t txEmbedding[128] = {0};
+					//						for (uint8_t i=0;i<128;++i){
+					//							txEmbedding[i] = faceEmbedding[i] * 100;
+					//						}
+					//						HAL_UART_Transmit(&huart3, txEmbedding, 128, 500);
+//						HAL_UART_Transmit(&huart3, txEmbedding, 512, 500);
+					}
+				}
+			}
 		  }
 
 		  rxDone = 0;
 		  receivedDataSize = 0;
+		  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 	  }
 	  if (HAL_GetTick() - lastTick >= 1000 && rxInProgress){
 		  HAL_UART_AbortReceive_IT(&huart2);
@@ -652,6 +639,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 //
 //  }
   if (rxBufferSize == 2){
+	  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
 	  rxBufferSize = ((uint16_t)rxBuffer[0] << 8) | (uint16_t)rxBuffer[1];
 	  if (!rxBufferSize){
 		  rxDone = 1;
@@ -675,7 +663,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   if(GPIO_Pin == GPIO_PIN_13) {
-	  if (!rxInProgress){
+	  if (!rxInProgress && !rxDone){
 		  HAL_StatusTypeDef error = HAL_UART_Receive_IT(&huart2, rxBuffer, rxBufferSize);
 		  if (error == HAL_ERROR || error == HAL_BUSY){
 			  if (TESTING){
@@ -684,6 +672,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			  }
 			  return;
 		  }
+		  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
 		  HAL_UART_Transmit(&huart2, txBufferGetImage, 1, 100);
 		  if (TESTING){
 			  HAL_UART_Transmit(&huart3, txBufferGetImage, 1, 100);
@@ -693,27 +682,35 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	  }
   }
   else if (GPIO_Pin == GPIO_PIN_8){
-	  if (!rxInProgress){
+	  if (!rxInProgress && !rxDone){
 		  HAL_ADC_Start(&hadc1);
 	      if (HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY) == HAL_OK) {
 	    	  adcValue = HAL_ADC_GetValue(&hadc1);
-	    	  if (adcValue <= 255){
+	    	  if (adcValue <= 1024){
 	    		  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_SET);
 	    	  }
 
-	          uint8_t txADC[2] = {0};
-	    	  txADC[0] = (adcValue >> 8) & 0xFF;
-	    	  txADC[1] = adcValue & 0xFF;
-	    	  HAL_UART_Transmit(&huart3, txADC, 2, 100);
+	    	  if (TESTING){
+		          uint8_t txADC[2] = {0};
+		    	  txADC[0] = (adcValue >> 8) & 0xFF;
+		    	  txADC[1] = adcValue & 0xFF;
+		    	  HAL_UART_Transmit(&huart3, txADC, 2, 100);
+	    	  }
 	      }
 		  HAL_StatusTypeDef error = HAL_UART_Receive_IT(&huart2, rxBuffer, rxBufferSize);
 		  if (error == HAL_ERROR || error == HAL_BUSY){
-			  uint8_t txError[1] = {error};
-			  HAL_UART_Transmit(&huart3, txError, 1, 100);
+			  if (TESTING){
+				  uint8_t txError[1] = {error};
+				  HAL_UART_Transmit(&huart3, txError, 1, 100);
+			  }
 			  return;
 		  }
+		  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
 		  HAL_UART_Transmit(&huart2, txBufferSentImage, 1, 100);
-		  HAL_UART_Transmit(&huart3, txBufferSentImage, 1, 100);
+		  if (TESTING){
+			  HAL_UART_Transmit(&huart3, txBufferSentImage, 1, 100);
+		  }
+		  lastTick = HAL_GetTick();
 		  rxInProgress = 1;
 	  }
   } else {
@@ -725,9 +722,10 @@ void HAL_UART_AbortReceiveCpltCallback(UART_HandleTypeDef *huart){
 	rxDone = 0;
 	rxInProgress = 0;
     rxBufferSize = 2;
-
+	HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
     if (TESTING){
-    	uint8_t txAbortReceive[1] = {1};
+    	uint8_t txAbortReceive[1] = {2};
 		HAL_UART_Transmit(&huart3, txAbortReceive, 1, 100);
     }
 }
