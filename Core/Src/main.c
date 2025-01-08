@@ -41,7 +41,7 @@
 #define IMAGE_HEIGHT 120
 #define CHANNEL_SIZE IMAGE_WIDTH*IMAGE_HEIGHT
 #define MAX_DETECTED_FACES 10
-#define MODE 0
+#define MODE 1
 #define TESTING 1
 
 /* USER CODE END PD */
@@ -146,6 +146,8 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 	  if (rxDone){
+		  uint8_t modeTx[] = {MODE};
+		  HAL_UART_Transmit(&huart2, modeTx, 1, 100);
 		  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
 		  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 		  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
@@ -185,9 +187,10 @@ int main(void)
 		  }
 
 		  uint8_t boxesLenTx[] = {(uint8_t)boxesLen};
-		  if (boxesLen == 0 || MODE == 0){
-			  HAL_UART_Transmit(&huart2, boxesLenTx, 1, 100);
-		  }
+		  HAL_UART_Transmit(&huart2, boxesLenTx, 1, 100);
+//		  if (boxesLen == 0 || MODE == 0){
+//			  HAL_UART_Transmit(&huart2, boxesLenTx, 1, 100);
+//		  }
 		  if (boxesLen > 0){
 			  uint8_t finalBoxes[boxesLen*4];
 			  for (size_t i=0, j=0;i<boxesLen*5;i+=5, j+=4){
@@ -214,7 +217,7 @@ int main(void)
 					float scaledAlignedImage[3*100*100];
 					CNN_AdaptiveAveragePool_Uint8_Float(3, height, width, 100, 100, alignedImage, scaledAlignedImage);
 					for (size_t j=0;j<3*100*100;++j){
-						scaledAlignedImage /= 255;
+						scaledAlignedImage[j] /= 255;
 					}
 					if (TESTING){
 						HAL_UART_Transmit(&huart3, txNull, 5, 100);
@@ -227,11 +230,11 @@ int main(void)
 					float faceEmbedding[128];
 					LiteFace_Model(scaledAlignedImage, faceEmbedding);
 
-					uint8_t embeddingLenTx[1] = {128};
-					HAL_UART_Transmit(&huart2, embeddingLenTx, 1, 100);
-					if (TESTING){
-						HAL_UART_Transmit(&huart3, embeddingLenTx, 1, 100);
-					}
+//					uint8_t embeddingLenTx[1] = {128};
+//					HAL_UART_Transmit(&huart2, embeddingLenTx, 1, 100);
+//					if (TESTING){
+//						HAL_UART_Transmit(&huart3, embeddingLenTx, 1, 100);
+//					}
 					uint8_t txEmbedding[128*4] = {0};
 					for (uint8_t i=0;i<128;++i){
 						uint32_t temp = 0;
@@ -243,7 +246,12 @@ int main(void)
 						txEmbedding[i * 4 + 2] = (temp >> 8) & 0xFF;
 						txEmbedding[i * 4 + 3] = temp & 0xFF;
 					}
-					HAL_UART_Transmit(&huart2, txEmbedding, 512, 1000);
+//					HAL_UART_Transmit(&huart2, txEmbedding, 512, 1000);
+					for (size_t pointer=0;pointer<4*128;pointer+=128){
+						HAL_UART_Transmit(&huart2, txEmbedding+pointer, 128, 1000);
+//						HAL_UART_Transmit(&huart3, txEmbedding+pointer, 128, 1000);
+						HAL_Delay(100);
+					}
 					if (TESTING){
 						HAL_UART_Transmit(&huart3, txNull, 5, 100);
 					//						uint8_t txEmbedding[128] = {0};
