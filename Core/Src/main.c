@@ -68,17 +68,10 @@ volatile uint8_t rxInProgress = 0;
 volatile uint16_t rxBufferSize = 2;
 uint8_t txBufferGetImage[1] = {255};
 uint8_t txBufferSentImage[1] = {0};
-uint8_t txBufferTest[1] = {1};
-uint8_t enableEcho = 0;
 uint8_t receivedData[CHANNEL_SIZE*2] = {0};
-//uint8_t receivedData[10000] = {0};
 volatile size_t receivedDataSize = 0;
 volatile uint32_t lastTick = 0;
 uint8_t txNull[5] = {0};
-
-//uint8_t image[320*240*3] = {0};
-//uint32_t imageSize = 320*240*3;
-
 volatile uint16_t adcValue = 0;
 
 /* USER CODE END PV */
@@ -108,6 +101,12 @@ int main(void)
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
+
+  /* Enable I-Cache---------------------------------------------------------*/
+  SCB_EnableICache();
+
+  /* Enable D-Cache---------------------------------------------------------*/
+  SCB_EnableDCache();
 
   /* MCU Configuration--------------------------------------------------------*/
 
@@ -153,20 +152,19 @@ int main(void)
 		  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 
 		  uint8_t imageRGB[CHANNEL_SIZE*3] = {0};
-//		  uint32_t imageRGBSize = CHANNEL_SIZE*3;
 		  for (size_t i = 0, j = 0; i < receivedDataSize; i += 2, j += 1) {
-			// Read the RGB565 value (2 bytes)
+			// read the RGB565 value (2 bytes)
 			uint16_t pixel = (receivedData[i] << 8) | receivedData[i + 1];
 
-			// Extract RGB components from RGB565
+			// extract RGB components from RGB565
 			uint8_t r5 = (pixel >> 11) & 0x1F; // 5 bits for red
 			uint8_t g6 = (pixel >> 5) & 0x3F;  // 6 bits for green
 			uint8_t b5 = pixel & 0x1F;         // 5 bits for blue
 
-			// Convert to 8-bit per channel (RGB888)
-			imageRGB[j] = (r5 << 3) | (r5 >> 2);       // Red
-			imageRGB[CHANNEL_SIZE + j] = (g6 << 2) | (g6 >> 4);   // Green
-			imageRGB[CHANNEL_SIZE*2 + j] = (b5 << 3) | (b5 >> 2);   // Blue
+			// convert to 8-bit per channel (RGB888)
+			imageRGB[j] = (r5 << 3) | (r5 >> 2);	// red
+			imageRGB[CHANNEL_SIZE + j] = (g6 << 2) | (g6 >> 4);	// green
+			imageRGB[CHANNEL_SIZE*2 + j] = (b5 << 3) | (b5 >> 2);	// blue
 		  }
 
 		  uint8_t scaledImage[3*48*64] = {0};
@@ -188,21 +186,18 @@ int main(void)
 
 		  uint8_t boxesLenTx[] = {(uint8_t)boxesLen};
 		  HAL_UART_Transmit(&huart2, boxesLenTx, 1, 100);
-//		  if (boxesLen == 0 || MODE == 0){
-//			  HAL_UART_Transmit(&huart2, boxesLenTx, 1, 100);
-//		  }
 		  if (boxesLen > 0){
-			  uint8_t finalBoxes[boxesLen*4];
-			  for (size_t i=0, j=0;i<boxesLen*5;i+=5, j+=4){
-				  finalBoxes[j] = roundf(boxes[i] * 2.5f);
-				  finalBoxes[j+1] = roundf(boxes[i+1] * 2.5f);
-				  finalBoxes[j+2] = roundf(boxes[i+2] * 2.5f);
-				  finalBoxes[j+3] = roundf(boxes[i+3] * 2.5f);
-			  }
-			  if (MODE == 0){
-				  HAL_UART_Transmit(&huart2, finalBoxes, (uint16_t)boxesLen*4, 100);
-			  }
-			if (MODE == 1){
+			uint8_t finalBoxes[boxesLen*4];
+			for (size_t i=0, j=0;i<boxesLen*5;i+=5, j+=4){
+			  finalBoxes[j] = roundf(boxes[i] * 2.5f);
+			  finalBoxes[j+1] = roundf(boxes[i+1] * 2.5f);
+			  finalBoxes[j+2] = roundf(boxes[i+2] * 2.5f);
+			  finalBoxes[j+3] = roundf(boxes[i+3] * 2.5f);
+			}
+			if (MODE == 0){
+			  HAL_UART_Transmit(&huart2, finalBoxes, (uint16_t)boxesLen*4, 100);
+			}
+			else if (MODE == 1){
 				for (size_t i=0;i<boxesLen*4;i+=4){
 					size_t start = finalBoxes[i * 4] + finalBoxes[i * 4 + 1] * IMAGE_WIDTH;
 					size_t width = finalBoxes[i * 4 + 2] - finalBoxes[i * 4];
@@ -210,8 +205,15 @@ int main(void)
 					uint8_t alignedImage[3*height*width];
 					for (uint8_t o=0;o<3;++o){
 						for (size_t j=0; j<height;++j){
-							memcpy(alignedImage, imageRGB + CHANNEL_SIZE*o + start + (j*IMAGE_WIDTH), width);
+							memcpy(alignedImage + o*width*height + j*width, imageRGB + CHANNEL_SIZE*o + start + (j*IMAGE_WIDTH), width);
 						}
+					}
+					if (TESTING){
+						uint8_t txSize[] = {height, width};
+						HAL_UART_Transmit(&huart3, txNull, 5, 100);
+						HAL_UART_Transmit(&huart3, txSize, 2, 100);
+//						HAL_UART_Transmit(&huart3, txNull, 5, 100);
+//						sendArrayUART(&huart3, alignedImage, 3*height*width);
 					}
 
 					float scaledAlignedImage[3*100*100];
@@ -221,8 +223,6 @@ int main(void)
 					}
 					if (TESTING){
 						HAL_UART_Transmit(&huart3, txNull, 5, 100);
-					//					sendArrayUART(&huart3, alignedImage, 3*height*width);
-					//					sendArrayUART(&huart3, scaledAlignedImage, 3*100*100);
 					}
 					const float means[3] = {0.5f, 0.5f, 0.5f};
 					const float stds[3] = {0.5f, 0.5f, 0.5f};
@@ -230,35 +230,25 @@ int main(void)
 					float faceEmbedding[128];
 					LiteFace_Model(scaledAlignedImage, faceEmbedding);
 
-//					uint8_t embeddingLenTx[1] = {128};
-//					HAL_UART_Transmit(&huart2, embeddingLenTx, 1, 100);
-//					if (TESTING){
-//						HAL_UART_Transmit(&huart3, embeddingLenTx, 1, 100);
-//					}
 					uint8_t txEmbedding[128*4] = {0};
-					for (uint8_t i=0;i<128;++i){
+					for (uint8_t j=0;j<128;++j){
+						// copy float to uint8_t
 						uint32_t temp = 0;
-						memcpy(&temp, &faceEmbedding[i], sizeof(float));
+						memcpy(&temp, &faceEmbedding[j], sizeof(float));
 
-						// Convert the uint32_t to big-endian and store in the output array
-						txEmbedding[i * 4] = (temp >> 24) & 0xFF;
-						txEmbedding[i * 4 + 1] = (temp >> 16) & 0xFF;
-						txEmbedding[i * 4 + 2] = (temp >> 8) & 0xFF;
-						txEmbedding[i * 4 + 3] = temp & 0xFF;
+						// convert uint32_t to 4 uint8_t (big-endian format)
+						txEmbedding[j * 4] = (temp >> 24) & 0xFF;
+						txEmbedding[j * 4 + 1] = (temp >> 16) & 0xFF;
+						txEmbedding[j * 4 + 2] = (temp >> 8) & 0xFF;
+						txEmbedding[j * 4 + 3] = temp & 0xFF;
 					}
-//					HAL_UART_Transmit(&huart2, txEmbedding, 512, 1000);
-					for (size_t pointer=0;pointer<4*128;pointer+=128){
-						HAL_UART_Transmit(&huart2, txEmbedding+pointer, 128, 1000);
-//						HAL_UART_Transmit(&huart3, txEmbedding+pointer, 128, 1000);
+					uint16_t chunkSize = 256;
+					for (size_t pointer=0;pointer<4*128;pointer+=chunkSize){
+						HAL_UART_Transmit(&huart2, txEmbedding+pointer, chunkSize, 1000);
 						HAL_Delay(100);
 					}
 					if (TESTING){
 						HAL_UART_Transmit(&huart3, txNull, 5, 100);
-					//						uint8_t txEmbedding[128] = {0};
-					//						for (uint8_t i=0;i<128;++i){
-					//							txEmbedding[i] = faceEmbedding[i] * 100;
-					//						}
-					//						HAL_UART_Transmit(&huart3, txEmbedding, 128, 500);
 //						HAL_UART_Transmit(&huart3, txEmbedding, 512, 500);
 					}
 				}
@@ -269,14 +259,8 @@ int main(void)
 		  receivedDataSize = 0;
 		  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 	  }
-	  if (HAL_GetTick() - lastTick >= 1000 && rxInProgress){
+	  if (HAL_GetTick() - lastTick >= 500 && rxInProgress){
 		  HAL_UART_AbortReceive_IT(&huart2);
-	  }
-	  if (enableEcho){
-		  HAL_StatusTypeDef error = HAL_UART_Receive(&huart2, rxBuffer, 1, 100);
-		  if (error == HAL_OK ){
-			  HAL_UART_Transmit(&huart3, rxBuffer, 1, 100);
-		  }
 	  }
   }
   /* USER CODE END 3 */
@@ -672,8 +656,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
   if(GPIO_Pin == GPIO_PIN_13) {
 	  if (!rxInProgress && !rxDone){
-		  HAL_StatusTypeDef error = HAL_UART_Receive_IT(&huart2, rxBuffer, rxBufferSize);
-		  if (error == HAL_ERROR || error == HAL_BUSY){
+		  HAL_StatusTypeDef error = HAL_UART_Receive_IT(&huart2, rxBuffer, 2);
+		  if (error != HAL_OK){
 			  if (TESTING){
 				  uint8_t txError[1] = {error};
 				  HAL_UART_Transmit(&huart3, txError, 1, 100);
@@ -705,8 +689,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 		    	  HAL_UART_Transmit(&huart3, txADC, 2, 100);
 	    	  }
 	      }
-		  HAL_StatusTypeDef error = HAL_UART_Receive_IT(&huart2, rxBuffer, rxBufferSize);
-		  if (error == HAL_ERROR || error == HAL_BUSY){
+		  HAL_StatusTypeDef error = HAL_UART_Receive_IT(&huart2, rxBuffer, 2);
+		  if (error != HAL_OK){
 			  if (TESTING){
 				  uint8_t txError[1] = {error};
 				  HAL_UART_Transmit(&huart3, txError, 1, 100);
