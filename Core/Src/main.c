@@ -67,7 +67,7 @@ volatile uint8_t rxDone = 0;
 volatile uint8_t rxInProgress = 0;
 volatile uint16_t rxBufferSize = 2;
 uint8_t txBufferGetImage[1] = {255};
-uint8_t txBufferSentImage[1] = {0};
+uint8_t txBufferSentImage[1] = {254};
 uint8_t receivedData[CHANNEL_SIZE*2] = {0};
 volatile size_t receivedDataSize = 0;
 volatile uint32_t lastTick = 0;
@@ -259,7 +259,7 @@ int main(void)
 		  receivedDataSize = 0;
 		  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 	  }
-	  if (HAL_GetTick() - lastTick >= 500 && rxInProgress){
+	  if (HAL_GetTick() - lastTick >= 1000 && rxInProgress){
 		  HAL_UART_AbortReceive_IT(&huart2);
 	  }
   }
@@ -698,9 +698,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			  return;
 		  }
 		  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-		  HAL_UART_Transmit(&huart2, txBufferSentImage, 1, 100);
+		  HAL_UART_Transmit(&huart2, txBufferGetImage, 1, 100);
 		  if (TESTING){
-			  HAL_UART_Transmit(&huart3, txBufferSentImage, 1, 100);
+			  HAL_UART_Transmit(&huart3, txBufferGetImage, 1, 100);
 		  }
 		  lastTick = HAL_GetTick();
 		  rxInProgress = 1;
@@ -732,7 +732,7 @@ void sendArrayUART(UART_HandleTypeDef *huart, const uint8_t *array, uint32_t arr
 		  txChunkSize = arraySize % 1024;
 	  }
 	  HAL_UART_Transmit(huart, array+pointer, txChunkSize, 1000);
-	  pointer += txChunkSize; // Move pointer by size
+	  pointer += txChunkSize;
 	}
 }
 
