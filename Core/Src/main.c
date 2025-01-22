@@ -36,7 +36,6 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-#define MAX_PACKET_SIZE 1024
 #define IMAGE_WIDTH 160
 #define IMAGE_HEIGHT 120
 #define CHANNEL_SIZE IMAGE_WIDTH*IMAGE_HEIGHT
@@ -61,18 +60,21 @@ PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 /* USER CODE BEGIN PV */
 
-//uint8_t rxBuffer[RX_MAX_BUFF_SIZE] = {0};
 uint8_t rxBuffer[2] = {0};
-volatile uint8_t rxDone = 0;
-volatile uint8_t rxInProgress = 0;
 volatile uint16_t rxBufferSize = 2;
-uint8_t txBufferGetImage[1] = {255};
-uint8_t txBufferSentImage[1] = {254};
+volatile uint8_t rxInProgress = 0;
+volatile uint8_t rxDone = 0;
+volatile uint8_t firstPacket = 0;
+
 uint8_t receivedData[CHANNEL_SIZE*2] = {0};
 volatile size_t receivedDataSize = 0;
-volatile uint32_t lastTick = 0;
-uint8_t txNull[5] = {0};
 volatile uint16_t adcValue = 0;
+volatile uint32_t lastTick = 0;
+volatile uint8_t abortReceivingFlag = 1;
+
+uint8_t txBufferGetImage[1] = {255};
+uint8_t txBufferSentImage[1] = {254};
+uint8_t txNull[5] = {0};
 
 /* USER CODE END PV */
 
@@ -84,7 +86,7 @@ static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
-void sendArrayUART(UART_HandleTypeDef *huart, const uint8_t *array, uint32_t arraySize);
+void UART_SendArray(UART_HandleTypeDef *huart, const uint8_t *array, uint32_t arraySize, uint16_t chunkSize);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -170,7 +172,7 @@ int main(void)
 		  uint8_t scaledImage[3*48*64] = {0};
 		  CNN_AdaptiveAveragePool_Uint8_Uint8(3, IMAGE_HEIGHT, IMAGE_WIDTH, 48, 64, imageRGB, scaledImage);
 
-		  float boxes[5*10];
+		  float boxes[5*MAX_DETECTED_FACES];
 		  int boxesLen = MTCNN_DetectFace(3, 48, 64, scaledImage, boxes);
 
 		  if (TESTING){
@@ -213,7 +215,7 @@ int main(void)
 						HAL_UART_Transmit(&huart3, txNull, 5, 100);
 						HAL_UART_Transmit(&huart3, txSize, 2, 100);
 //						HAL_UART_Transmit(&huart3, txNull, 5, 100);
-//						sendArrayUART(&huart3, alignedImage, 3*height*width);
+//						UART_SendArray(&huart3, alignedImage, 3*height*width, 1024);
 					}
 
 					float scaledAlignedImage[3*100*100];
@@ -255,13 +257,12 @@ int main(void)
 			}
 		  }
 		  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-//		  uint32_t tick = HAL_GetTick();
-//		  while (HAL_GetTick() - tick >= 1000);
 		  HAL_Delay(1000);
 		  receivedDataSize = 0;
 		  rxDone = 0;
 	  }
-	  if (HAL_GetTick() - lastTick >= 1000 && rxInProgress){
+	  if (HAL_GetTick() - lastTick >= 1000 && rxInProgress && abortReceivingFlag){
+		  abortReceivingFlag = 0;
 		  HAL_UART_AbortReceive_IT(&huart2);
 	  }
   }
@@ -624,16 +625,15 @@ static void MX_GPIO_Init(void)
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-//  if (rxBufferSize == 4){
-//	  rxBufferSize = ((uint32_t)rxBuffer[0] << 32) | ((uint32_t)rxBuffer[1] << 16) | ((uint32_t)rxBuffer[2] << 8) | (uint32_t)rxBuffer[3];
-//	  HAL_UART_Receive_IT(&huart2, receivedData + receivedDataSize, rxBufferSize);
-//	  HAL_UART_Transmit(&huart3, rxBuffer, 4, 100);
-//  }
-//  else{
-//
-//  }
   if (rxBufferSize == 2){
 	  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
+	  if (firstPacket){
+		  firstPacket = 0;
+		  HAL_UART_Transmit(&huart2, rxBuffer, 2, 100);
+		  HAL_UART_Receive_IT(&huart2, rxBuffer, 2);
+		  lastTick = HAL_GetTick();
+		  return;
+	  }
 	  rxBufferSize = ((uint16_t)rxBuffer[0] << 8) | (uint16_t)rxBuffer[1];
 	  if (!rxBufferSize){
 		  rxDone = 1;
@@ -660,6 +660,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	  return;
   }
   if(GPIO_Pin == GPIO_PIN_13) {
+	  firstPacket = 1;
 	  HAL_StatusTypeDef error = HAL_UART_Receive_IT(&huart2, rxBuffer, 2);
 	  if (error != HAL_OK){
 		  if (TESTING){
@@ -680,7 +681,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	  HAL_ADC_Start(&hadc1);
 	  if (HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY) == HAL_OK) {
 		  adcValue = HAL_ADC_GetValue(&hadc1);
-		  if (adcValue <= 1024){
+		  if (adcValue <= 4096){
 			  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_SET);
 		  }
 
@@ -691,6 +692,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 			  HAL_UART_Transmit(&huart3, txADC, 2, 100);
 		  }
 	  }
+	  firstPacket = 1;
 	  HAL_StatusTypeDef error = HAL_UART_Receive_IT(&huart2, rxBuffer, 2);
 	  if (error != HAL_OK){
 		  if (TESTING){
@@ -714,6 +716,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 void HAL_UART_AbortReceiveCpltCallback(UART_HandleTypeDef *huart){
 	rxDone = 0;
 	rxInProgress = 0;
+	abortReceivingFlag = 1;
     rxBufferSize = 2;
 	HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
@@ -723,14 +726,14 @@ void HAL_UART_AbortReceiveCpltCallback(UART_HandleTypeDef *huart){
     }
 }
 
-void sendArrayUART(UART_HandleTypeDef *huart, const uint8_t *array, uint32_t arraySize){
+void UART_SendArray(UART_HandleTypeDef *huart, const uint8_t *array, uint32_t arraySize, uint16_t chunkSize){
 	size_t pointer = 0;
 	uint16_t txChunkSize = 0;
-	for (size_t n = 0; n < arraySize; n += 1024){
-	  if (n + 1024 <= arraySize) {
-		  txChunkSize = 1024;
+	for (size_t n = 0; n < arraySize; n += chunkSize){
+	  if (n + chunkSize <= arraySize) {
+		  txChunkSize = chunkSize;
 	  } else {
-		  txChunkSize = arraySize % 1024;
+		  txChunkSize = arraySize % chunkSize;
 	  }
 	  HAL_UART_Transmit(huart, array+pointer, txChunkSize, 1000);
 	  pointer += txChunkSize;
