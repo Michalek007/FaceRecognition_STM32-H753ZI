@@ -53,6 +53,8 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 
+TIM_HandleTypeDef htim1;
+
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
 
@@ -71,6 +73,8 @@ volatile size_t receivedDataSize = 0;
 volatile uint16_t adcValue = 0;
 volatile uint32_t lastTick = 0;
 volatile uint8_t abortReceivingFlag = 1;
+volatile uint8_t timerTick = 0;
+volatile uint8_t lastTimerTick = 0;
 
 uint8_t txBufferGetImage[1] = {255};
 uint8_t txBufferSentImage[1] = {254};
@@ -85,6 +89,7 @@ static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
 void UART_SendArray(UART_HandleTypeDef *huart, const uint8_t *array, uint32_t arraySize, uint16_t chunkSize);
 /* USER CODE END PFP */
@@ -132,9 +137,11 @@ int main(void)
   MX_USB_OTG_FS_PCD_Init();
   MX_USART2_UART_Init();
   MX_ADC1_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_ADCEx_Calibration_Start(&hadc1, ADC_CALIB_OFFSET, ADC_SINGLE_ENDED);
+  HAL_TIM_Base_Start_IT(&htim1);
 
   HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
   /* USER CODE END 2 */
@@ -147,12 +154,14 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 	  if (rxDone){
+		  // sending system mode
 		  uint8_t modeTx[] = {MODE};
 		  HAL_UART_Transmit(&huart2, modeTx, 1, 100);
 		  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
 		  HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 		  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 
+		  // converting RGB5656 to RGB888
 		  uint8_t imageRGB[CHANNEL_SIZE*3] = {0};
 		  for (size_t i = 0, j = 0; i < receivedDataSize; i += 2, j += 1) {
 			// read the RGB565 value (2 bytes)
@@ -169,9 +178,11 @@ int main(void)
 			imageRGB[CHANNEL_SIZE*2 + j] = (b5 << 3) | (b5 >> 2);	// blue
 		  }
 
+		  // scaling image to 48x64
 		  uint8_t scaledImage[3*48*64] = {0};
 		  CNN_AdaptiveAveragePool_Uint8_Uint8(3, IMAGE_HEIGHT, IMAGE_WIDTH, 48, 64, imageRGB, scaledImage);
 
+		  // face detection algorithm
 		  float boxes[5*MAX_DETECTED_FACES];
 		  int boxesLen = MTCNN_DetectFace(3, 48, 64, scaledImage, boxes);
 
@@ -186,9 +197,11 @@ int main(void)
 			  }
 		  }
 
+		  // sending count of detected faces
 		  uint8_t boxesLenTx[] = {(uint8_t)boxesLen};
 		  HAL_UART_Transmit(&huart2, boxesLenTx, 1, 100);
 		  if (boxesLen > 0){
+			// scaling boxes to original size
 			uint8_t finalBoxes[boxesLen*4];
 			for (size_t i=0, j=0;i<boxesLen*5;i+=5, j+=4){
 			  finalBoxes[j] = roundf(boxes[i] * 2.5f);
@@ -196,11 +209,14 @@ int main(void)
 			  finalBoxes[j+2] = roundf(boxes[i+2] * 2.5f);
 			  finalBoxes[j+3] = roundf(boxes[i+3] * 2.5f);
 			}
+			// sending detected boxes
 			if (MODE == 0){
 			  HAL_UART_Transmit(&huart2, finalBoxes, (uint16_t)boxesLen*4, 100);
 			}
 			else if (MODE == 1){
+				// face recognition algorithm
 				for (size_t i=0;i<boxesLen;++i){
+					// extracting face from image
 					size_t start = finalBoxes[i * 4] + finalBoxes[i * 4 + 1] * IMAGE_WIDTH;
 					size_t width = finalBoxes[i * 4 + 2] - finalBoxes[i * 4];
 					size_t height = finalBoxes[i * 4 + 3] - finalBoxes[i * 4 + 1];
@@ -218,20 +234,26 @@ int main(void)
 //						UART_SendArray(&huart3, alignedImage, 3*height*width, 1024);
 					}
 
+					// scaling image to 100x100
 					float scaledAlignedImage[3*100*100];
 					CNN_AdaptiveAveragePool_Uint8_Float(3, height, width, 100, 100, alignedImage, scaledAlignedImage);
-					for (size_t j=0;j<3*100*100;++j){
-						scaledAlignedImage[j] /= 255;
-					}
 					if (TESTING){
 						HAL_UART_Transmit(&huart3, txNull, 5, 100);
+					}
+
+					// image normalization
+					for (size_t j=0;j<3*100*100;++j){
+						scaledAlignedImage[j] /= 255;
 					}
 					const float means[3] = {0.5f, 0.5f, 0.5f};
 					const float stds[3] = {0.5f, 0.5f, 0.5f};
 					CNN_Normalize(3, 100, 100, scaledAlignedImage, means, stds);
+
+					// getting face embedding
 					float faceEmbedding[128];
 					LiteFace_Model(scaledAlignedImage, faceEmbedding);
 
+					// converting face embedding to raw bytes
 					uint8_t txEmbedding[128*4] = {0};
 					for (uint8_t j=0;j<128;++j){
 						// copy float to uint8_t
@@ -244,6 +266,8 @@ int main(void)
 						txEmbedding[j * 4 + 2] = (temp >> 8) & 0xFF;
 						txEmbedding[j * 4 + 3] = temp & 0xFF;
 					}
+
+					// sending face embedding
 					uint16_t chunkSize = 256;
 					for (size_t pointer=0;pointer<4*128;pointer+=chunkSize){
 						HAL_UART_Transmit(&huart2, txEmbedding+pointer, chunkSize, 1000);
@@ -260,10 +284,6 @@ int main(void)
 		  HAL_Delay(1000);
 		  receivedDataSize = 0;
 		  rxDone = 0;
-	  }
-	  if (HAL_GetTick() - lastTick >= 1000 && rxInProgress && abortReceivingFlag){
-		  abortReceivingFlag = 0;
-		  HAL_UART_AbortReceive_IT(&huart2);
 	  }
   }
   /* USER CODE END 3 */
@@ -396,6 +416,53 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief TIM1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM1_Init(void)
+{
+
+  /* USER CODE BEGIN TIM1_Init 0 */
+
+  /* USER CODE END TIM1_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM1_Init 1 */
+
+  /* USER CODE END TIM1_Init 1 */
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 23999;
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 4999;
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 0;
+  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM1_Init 2 */
+
+  /* USER CODE END TIM1_Init 2 */
 
 }
 
@@ -625,13 +692,13 @@ static void MX_GPIO_Init(void)
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
+  lastTimerTick = timerTick;
   if (rxBufferSize == 2){
 	  HAL_GPIO_WritePin(PLED_GPIO_Port, PLED_Pin, GPIO_PIN_RESET);
 	  if (firstPacket){
 		  firstPacket = 0;
 		  HAL_UART_Transmit(&huart2, rxBuffer, 2, 100);
 		  HAL_UART_Receive_IT(&huart2, rxBuffer, 2);
-		  lastTick = HAL_GetTick();
 		  return;
 	  }
 	  rxBufferSize = ((uint16_t)rxBuffer[0] << 8) | (uint16_t)rxBuffer[1];
@@ -651,7 +718,6 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	  receivedDataSize += rxBufferSize;
 	  rxBufferSize = 2;
   }
-  lastTick = HAL_GetTick();
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
@@ -659,6 +725,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   if (rxInProgress || rxDone){
 	  return;
   }
+  lastTimerTick = timerTick;
   if(GPIO_Pin == GPIO_PIN_13) {
 	  firstPacket = 1;
 	  HAL_StatusTypeDef error = HAL_UART_Receive_IT(&huart2, rxBuffer, 2);
@@ -674,7 +741,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	  if (TESTING){
 		  HAL_UART_Transmit(&huart3, txBufferGetImage, 1, 100);
 	  }
-	  lastTick = HAL_GetTick();
 	  rxInProgress = 1;
   }
   else if (GPIO_Pin == GPIO_PIN_8){
@@ -706,7 +772,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	  if (TESTING){
 		  HAL_UART_Transmit(&huart3, txBufferGetImage, 1, 100);
 	  }
-	  lastTick = HAL_GetTick();
 	  rxInProgress = 1;
   } else {
       __NOP();
@@ -723,6 +788,21 @@ void HAL_UART_AbortReceiveCpltCallback(UART_HandleTypeDef *huart){
     if (TESTING){
     	uint8_t txAbortReceive[1] = {2};
 		HAL_UART_Transmit(&huart3, txAbortReceive, 1, 100);
+    }
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if (htim->Instance == TIM1)
+    {
+    	++timerTick;
+    	if (TESTING){
+            HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
+    	}
+		if (timerTick - lastTimerTick >= 2 && rxInProgress && abortReceivingFlag){
+		  abortReceivingFlag = 0;
+		  HAL_UART_AbortReceive_IT(&huart2);
+		}
     }
 }
 
