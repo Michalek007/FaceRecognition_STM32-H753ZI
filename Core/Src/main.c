@@ -71,7 +71,6 @@ volatile uint8_t firstPacket = 0;
 uint8_t receivedData[CHANNEL_SIZE*2] = {0};
 volatile size_t receivedDataSize = 0;
 volatile uint16_t adcValue = 0;
-volatile uint32_t lastTick = 0;
 volatile uint8_t abortReceivingFlag = 1;
 volatile uint8_t timerTick = 0;
 volatile uint8_t lastTimerTick = 0;
